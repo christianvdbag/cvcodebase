@@ -1,0 +1,36 @@
+name: Validate GitHub Pages Site
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "gh-pages-site/**"
+      - ".github/workflows/validate-gh-pages-site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure required files exist
+        run: |
+          test -f gh-pages-site/index.html
+          test -f gh-pages-site/assets/styles.css
+          test -f gh-pages-site/assets/main.js
+
+      - name: Validate HTML has title and stylesheet
+        run: |
+          grep -q "<title>" gh-pages-site/index.html
+          grep -q "assets/styles.css" gh-pages-site/index.html
+
+      - name: Validate CSS and JS are non-empty
+        run: |
+          test -s gh-pages-site/assets/styles.css
+          test -s gh-pages-site/assets/main.js

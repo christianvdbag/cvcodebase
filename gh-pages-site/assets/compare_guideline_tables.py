@@ -144,7 +144,7 @@ def parse_docx_records(docx_paths: list[Path]) -> list[Record]:
                 if id_match:
                     record_id = normalize_id(id_match.group(1))
                     requirement = clean_requirement_text(right)
-                    if not record_id:
+                    if not record_id or record_id == "ID":
                         continue
                     rec = Record(
                         source="docx",
@@ -340,7 +340,7 @@ def compare_records(docx_records: list[Record], xlsm_records: list[Record]) -> l
                 {
                     "Status": "Missing in DOCX",
                     "Guideline": x.guideline_name,
-                    "ID": "",
+                    "ID": x.record_id,
                     "XLSM ID": x.record_id,
                     "DOCX Control Description": "",
                     "DOCX Control Requirement": "",
@@ -357,6 +357,7 @@ def write_outputs(out_xlsx: Path, out_docx_csv: Path, comparison_rows: list[dict
     out_xlsx.parent.mkdir(parents=True, exist_ok=True)
     out_docx_csv.parent.mkdir(parents=True, exist_ok=True)
 
+    deduped_docx_records = list(dedupe_records(docx_records).values())
     docx_df = pd.DataFrame(
         [
             {
@@ -366,7 +367,7 @@ def write_outputs(out_xlsx: Path, out_docx_csv: Path, comparison_rows: list[dict
                 "control_description": r.control_description,
                 "control_requirement": r.control_requirement,
             }
-            for r in docx_records
+            for r in deduped_docx_records
         ]
     )
     docx_df.to_csv(out_docx_csv, index=False)

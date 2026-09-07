@@ -309,7 +309,6 @@ Data Security Governance Guideline_v3.0,data security governance,9.4.2,Protectio
 Data Security Governance Guideline_v3.0,data security governance,10,Transfer of media,The transfer of media must be securely managed to ensure the protection and integrity of the information throughout the entire transfer process.
 Data Security Governance Guideline_v3.0,data security governance,10.1,Transfer of media,"Courier identification standards and procedures to verify the identification of couriers should be defined to ensure that only authorized, reliable transport or couriers are used for the transfer of media."
 Data Security Governance Guideline_v3.0,data security governance,10.2,Transfer of media,Media transport logs should be kept over the whole lifecycle if this is possible.
-Data Security Governance Guideline_v3.0,data security governance,ID,Transfer of media,ID: 11 (version 3.0)
 Data Security Governance Guideline_v3.0,data security governance,11,Transfer of media,11 DOR.ICT.DSG.SMD.001
 Data Security Governance Guideline_v3.0,data security governance,11.1,Transfer of media,11.1 DOR.ICT.DSG.SMD.002
 Data Security Governance Guideline_v3.0,data security governance,11.2,Transfer of media,11.2 DOR.ICT.DSG.SMD.003
@@ -813,7 +812,6 @@ ICT Operations Guideline_v2.0,ict operations,18.4,ICT Service Continuity Plans,"
 ICT Operations Guideline_v2.0,ict operations,18.5,ICT Service Continuity Plans,The plans must consider and implement continuity measures to mitigate failures of ICT third-party service providers of ICT services supporting critical or important functions.
 ICT Operations Guideline_v2.0,ict operations,18.6,ICT Service Continuity Plans,"Relevant documentation that supports the ICT service continuity plans must be developed, identified, acquired, made available to authorized stakeholders and reviewed periodically."
 ICT Operations Guideline_v2.0,ict operations,18.7,ICT Service Continuity Plans,The ICT service continuity plans must be updated at defined intervals.
-ICT Operations Guideline_v2.0,ict operations,18.7,ICT Service Continuity Plans,
 ICT Operations Guideline_v2.0,ict operations,19,ICT Service Continuity Plans Testing,It must be ensured that ICT service continuity plans as well as procedures are appropriately tested.
 ICT Operations Guideline_v2.0,ict operations,19.1,ICT Service Continuity Plans Testing,It must be ensured that ICT service continuity plans are tested at least annually or after a significant change to ICT Systems supporting critical or important functions.
 ICT Operations Guideline_v2.0,ict operations,19.2,ICT Service Continuity Plans Testing,"The tests must include procedures to verify that personnel, third party ICT service providers, ICT Systems and services respond to failure scenarios by achieving the defined RTOs and RPOs."
@@ -1034,7 +1032,6 @@ ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerabilit
 ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerability management,20,ID: 20 (version 2.0),20 DOR.ICT.PVM.REC.001
 ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerability management,20.1,ID: 20 (version 2.0),20.1 DOR.ICT.PVM.REC.002
 ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerability management,20.2,ID: 20 (version 2.0),20.2 DOR.ICT.PVM.REC.003
-ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerability management,ID,ID: 20 (version 2.0),Evaluation of vulnerabilities
 ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerability management,21,ID: 20 (version 2.0),It must be ensured that identified vulnerabilities and associated risks are carefully and appropriately evaluated.
 ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerability management,21.1,ID: 20 (version 2.0),The severity and risks associated with detected vulnerabilities must be determined without undue delay after detection.
 ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerability management,21.2,ID: 20 (version 2.0),"Priority of the remediation activities for each validated vulnerability must be determined by considering associated risks. To make a consistent and informed decision on priority, the vulnerability item priority must be assessed as follows:"
@@ -1076,7 +1073,6 @@ ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerabilit
 ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerability management,27.3,Testing and deployment of patches,"Adequate measures must be in place for system integrity testing after patch deployment, including rollback plans in the event that system integrity testing fails."
 ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerability management,27.4,Testing and deployment of patches,"The Asset Owners must, if possible, use tools that support centralized patch management capabilities and automated deployment of applicable patches."
 ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerability management,27.5,Testing and deployment of patches,"During the patch processing within Change Management, the downloaded/delivered patch must be scanned for malware and the patch source is authenticated. The integrity of the patch must be confirmed before deployment (e.g. by verifying digital signature of the patch, hash signature comparison against the vendor publicly reported patch file hash and integrity-check)."
-ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerability management,ID,Testing and deployment of patches,ID: 28 (version 2.0)
 ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerability management,28,Testing and deployment of patches,28 DOR.ICT.PVM.PAR.001
 ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerability management,28.1,Testing and deployment of patches,28.1 DOR.ICT.PVM.PAR.002
 ICT Patch and Vulnerability Management Guideline_v2.0,ict patch and vulnerability management,28.2,Testing and deployment of patches,28.2 DOR.ICT.PVM.PAR.003
@@ -1549,7 +1545,6 @@ Software Development and ICT Change Management Guideline_v2.0,software developme
 Software Development and ICT Change Management Guideline_v2.0,software development and ict change management,5.1,ID: 5 (version 2.0),5.1 DOR.ICT.SDC.CVA.002
 Software Development and ICT Change Management Guideline_v2.0,software development and ict change management,5.2,ID: 5 (version 2.0),5.2 DOR.ICT.SDC.CVA.003
 Software Development and ICT Change Management Guideline_v2.0,software development and ict change management,5.3,ID: 5 (version 2.0),5.3 DOR.ICT.SDC.CVA.004
-Software Development and ICT Change Management Guideline_v2.0,software development and ict change management,ID,ID: 5 (version 2.0),Change approval
 Software Development and ICT Change Management Guideline_v2.0,software development and ict change management,6,ID: 5 (version 2.0),It must be ensured that every ICT Change is approved.
 Software Development and ICT Change Management Guideline_v2.0,software development and ict change management,6.1,ID: 5 (version 2.0),The approval level for every ICT Change must be defined and executed based on the results of the risk assessment.
 Software Development and ICT Change Management Guideline_v2.0,software development and ict change management,6.2,ID: 5 (version 2.0),A Change Advisory Board (CAB) must approve changes to IT Assets in production or impacting production data and emergency changes.

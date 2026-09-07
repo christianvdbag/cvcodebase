@@ -69,6 +69,8 @@ def normalize_id(value: str) -> str:
     v = re.sub(r"^id\s*:\s*", "", v, flags=re.IGNORECASE)
     v = re.sub(r"\(.*?version.*?\)", "", v, flags=re.IGNORECASE)
     v = re.sub(r"[^A-Za-z0-9.\-]", "", v)
+    while re.search(r"\.0$", v):
+        v = re.sub(r"\.0$", "", v)
     return v.upper()
 
 
@@ -419,7 +421,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sheet", default="Mapped - v8 for UPDATE", help="XLSM sheet name")
     parser.add_argument("--header-row", type=int, default=7, help="0-based header row index in XLSM")
     parser.add_argument("--guideline-col", default="Name of Guideline", help="Guideline column")
-    parser.add_argument("--id-col", default="MCF ID", help="ID column")
+    parser.add_argument("--id-col", default="Requirement ID", help="ID column")
     parser.add_argument("--description-col", default="Control description", help="Control description column")
     parser.add_argument("--requirement-col", default="Control requirements v8.0", help="Control requirement column")
     parser.add_argument("--deleted-col", default="Deleted", help="Deleted marker column")

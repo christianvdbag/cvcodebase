@@ -267,6 +267,10 @@ def compare_records(docx_records: list[Record], xlsm_records: list[Record]) -> l
                 "DOCX Control Requirement": d.control_requirement if d else "",
                 "XLSM Control Description": x.control_description if x else "",
                 "XLSM Control Requirement": x.control_requirement if x else "",
+                "DOCX Guideline Name": d.guideline_name if d else "",
+                "XLSM Guideline Name": x.guideline_name if x else "",
+                "DOCX Guideline Key": d.guideline_key if d else "",
+                "XLSM Guideline Key": x.guideline_key if x else "",
             }
         )
 
@@ -317,6 +321,10 @@ def compare_records(docx_records: list[Record], xlsm_records: list[Record]) -> l
                     "DOCX Control Requirement": d.control_requirement,
                     "XLSM Control Description": x.control_description,
                     "XLSM Control Requirement": x.control_requirement,
+                    "DOCX Guideline Name": d.guideline_name,
+                    "XLSM Guideline Name": x.guideline_name,
+                    "DOCX Guideline Key": d.guideline_key,
+                    "XLSM Guideline Key": x.guideline_key,
                 }
             )
 
@@ -333,6 +341,10 @@ def compare_records(docx_records: list[Record], xlsm_records: list[Record]) -> l
                     "DOCX Control Requirement": d.control_requirement,
                     "XLSM Control Description": "",
                     "XLSM Control Requirement": "",
+                    "DOCX Guideline Name": d.guideline_name,
+                    "XLSM Guideline Name": "",
+                    "DOCX Guideline Key": d.guideline_key,
+                    "XLSM Guideline Key": guideline_key,
                 }
             )
         for j, x in enumerate(x_left):
@@ -348,6 +360,10 @@ def compare_records(docx_records: list[Record], xlsm_records: list[Record]) -> l
                     "DOCX Control Requirement": "",
                     "XLSM Control Description": x.control_description,
                     "XLSM Control Requirement": x.control_requirement,
+                    "DOCX Guideline Name": "",
+                    "XLSM Guideline Name": x.guideline_name,
+                    "DOCX Guideline Key": guideline_key,
+                    "XLSM Guideline Key": x.guideline_key,
                 }
             )
 

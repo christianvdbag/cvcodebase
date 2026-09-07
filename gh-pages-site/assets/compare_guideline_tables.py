@@ -85,10 +85,18 @@ def strip_after_markers(text: str) -> str:
     return normalize_ws(t[:cut])
 
 
+def normalize_footnote_tokens(text: str) -> str:
+    t = normalize_ws(text)
+    t = re.sub(r"\b(Data\s+crown\s+jewels?)(\d+)\b", r"\1 [\2]", t, flags=re.IGNORECASE)
+    t = re.sub(r"\b(Crown\s+Jewel[s]?)(\d+)\b", r"\1 [\2]", t, flags=re.IGNORECASE)
+    return normalize_ws(t)
+
+
 def clean_requirement_text(text: str) -> str:
     t = normalize_ws(text)
     t = t.replace("  ", " ")
     t = t.replace(" and key Hardware,", " and key management technology changes.")
+    t = normalize_footnote_tokens(t)
     t = strip_after_markers(t)
     return normalize_ws(t)
 
@@ -200,8 +208,8 @@ def parse_xlsm_records(
                 guideline_name=guideline,
                 guideline_key=normalize_guideline_name(guideline),
                 record_id=record_id,
-                control_description=normalize_ws(row[d_col]),
-                control_requirement=normalize_ws(row[r_col]),
+                control_description=normalize_footnote_tokens(row[d_col]),
+                control_requirement=normalize_footnote_tokens(row[r_col]),
             )
         )
     return records

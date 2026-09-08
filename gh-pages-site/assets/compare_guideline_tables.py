@@ -88,6 +88,27 @@ def token_jaccard(a: str, b: str) -> float:
     return len(at & bt) / len(at | bt)
 
 
+def requirement_delta_string(docx_text: str, xlsm_text: str) -> str:
+    docx_tokens = normalize_ws(docx_text).split()
+    xlsm_tokens = normalize_ws(xlsm_text).split()
+    if docx_tokens == xlsm_tokens:
+        return ""
+    parts: list[str] = []
+    matcher = SequenceMatcher(a=docx_tokens, b=xlsm_tokens)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        left = " ".join(docx_tokens[i1:i2]).strip()
+        right = " ".join(xlsm_tokens[j1:j2]).strip()
+        if tag == "replace":
+            parts.append(f"~ {left} -> {right}")
+        elif tag == "delete":
+            parts.append(f"- {left}")
+        elif tag == "insert":
+            parts.append(f"+ {right}")
+    return " | ".join(parts)
+
+
 def harmonize_token_set(tokens: list[str], other_tokens: set[str]) -> set[str]:
     harmonized: set[str] = set()
     for token in tokens:
@@ -738,6 +759,9 @@ def compare_records(
                 "XLSM ID": x.record_id,
                 "DOCX Control Description": d.control_description if d else "",
                 "DOCX Control Requirement": d.control_requirement if d else "",
+                "Requirement Delta": requirement_delta_string(
+                    d.control_requirement if d else "", x.control_requirement if x else ""
+                ),
                 "XLSM Control Description": x.control_description if x else "",
                 "XLSM Control Requirement": x.control_requirement if x else "",
                 "DOCX Guideline Name": d.guideline_name if d else "",
@@ -798,6 +822,7 @@ def compare_records(
                     "XLSM ID": x.record_id,
                     "DOCX Control Description": d.control_description,
                     "DOCX Control Requirement": d.control_requirement,
+                    "Requirement Delta": requirement_delta_string(d.control_requirement, x.control_requirement),
                     "XLSM Control Description": x.control_description,
                     "XLSM Control Requirement": x.control_requirement,
                     "DOCX Guideline Name": d.guideline_name,
@@ -821,6 +846,7 @@ def compare_records(
                     "XLSM ID": "",
                     "DOCX Control Description": d.control_description,
                     "DOCX Control Requirement": d.control_requirement,
+                    "Requirement Delta": requirement_delta_string(d.control_requirement, ""),
                     "XLSM Control Description": "",
                     "XLSM Control Requirement": "",
                     "DOCX Guideline Name": d.guideline_name,
@@ -843,6 +869,7 @@ def compare_records(
                     "XLSM ID": x.record_id,
                     "DOCX Control Description": "",
                     "DOCX Control Requirement": "",
+                    "Requirement Delta": requirement_delta_string("", x.control_requirement),
                     "XLSM Control Description": x.control_description,
                     "XLSM Control Requirement": x.control_requirement,
                     "DOCX Guideline Name": "",
@@ -899,6 +926,7 @@ def write_outputs(
             "Judge Action",
             "Judge Reason",
             "DOCX Control Requirement",
+            "Requirement Delta",
             "XLSM Control Requirement",
         ]
     ].copy()
@@ -927,6 +955,7 @@ def write_outputs(
         status_col = header_idx["Status"]
         docx_desc_col = header_idx["DOCX Control Description"]
         docx_req_col = header_idx["DOCX Control Requirement"]
+        req_delta_col = header_idx["Requirement Delta"]
         xlsm_desc_col = header_idx["XLSM Control Description"]
         xlsm_req_col = header_idx["XLSM Control Requirement"]
         highlight = PatternFill(start_color="FFF4B084", end_color="FFF4B084", fill_type="solid")
@@ -936,14 +965,17 @@ def write_outputs(
                 ws.cell(row=row_idx, column=status_col).fill = highlight
                 ws.cell(row=row_idx, column=docx_desc_col).fill = highlight
                 ws.cell(row=row_idx, column=docx_req_col).fill = highlight
+                ws.cell(row=row_idx, column=req_delta_col).fill = highlight
             elif status.startswith("Missing in XLSM"):
                 ws.cell(row=row_idx, column=status_col).fill = highlight
                 ws.cell(row=row_idx, column=xlsm_desc_col).fill = highlight
                 ws.cell(row=row_idx, column=xlsm_req_col).fill = highlight
+                ws.cell(row=row_idx, column=req_delta_col).fill = highlight
             elif "description and requirement differ" in status:
                 ws.cell(row=row_idx, column=status_col).fill = highlight
                 ws.cell(row=row_idx, column=docx_desc_col).fill = highlight
                 ws.cell(row=row_idx, column=docx_req_col).fill = highlight
+                ws.cell(row=row_idx, column=req_delta_col).fill = highlight
                 ws.cell(row=row_idx, column=xlsm_desc_col).fill = highlight
                 ws.cell(row=row_idx, column=xlsm_req_col).fill = highlight
             elif "description differs" in status:
@@ -953,6 +985,7 @@ def write_outputs(
             elif "requirement differs" in status:
                 ws.cell(row=row_idx, column=status_col).fill = highlight
                 ws.cell(row=row_idx, column=docx_req_col).fill = highlight
+                ws.cell(row=row_idx, column=req_delta_col).fill = highlight
                 ws.cell(row=row_idx, column=xlsm_req_col).fill = highlight
 
 

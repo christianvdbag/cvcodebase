@@ -44,6 +44,20 @@ def normalize_for_compare(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", t)
 
 
+def strip_footnote_markers(text: str) -> str:
+    t = normalize_ws(text)
+    t = normalize_footnote_tokens(t)
+    t = re.sub(r"\[\s*\d{1,3}\s*\]", " ", t)
+    t = re.sub(r"\(\s*\d{1,3}\s*\)", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def normalize_for_judge(text: str) -> str:
+    t = strip_footnote_markers(text).lower()
+    return re.sub(r"[^a-z0-9]+", "", t)
+
+
 def normalize_guideline_name(name: str) -> str:
     n = normalize_ws(name)
     n = re.sub(r"\.(pdf|docx)$", "", n, flags=re.IGNORECASE)
@@ -233,7 +247,7 @@ def dedupe_records(records: list[Record]) -> dict[tuple[str, str], Record]:
 
 
 def score_text(a: str, b: str) -> float:
-    return SequenceMatcher(None, normalize_ws(a).lower(), normalize_ws(b).lower()).ratio()
+    return SequenceMatcher(None, strip_footnote_markers(a).lower(), strip_footnote_markers(b).lower()).ratio()
 
 
 def build_status(docx_row: Record | None, xlsm_row: Record | None) -> str:
@@ -252,6 +266,34 @@ def build_status(docx_row: Record | None, xlsm_row: Record | None) -> str:
     return "Match"
 
 
+def build_status_for_judge(docx_row: Record | None, xlsm_row: Record | None) -> str:
+    if docx_row is None:
+        return "Missing in DOCX"
+    if xlsm_row is None:
+        return "Missing in XLSM"
+    desc_diff = normalize_for_judge(docx_row.control_description) != normalize_for_judge(xlsm_row.control_description)
+    req_diff = normalize_for_judge(docx_row.control_requirement) != normalize_for_judge(xlsm_row.control_requirement)
+    if desc_diff and req_diff:
+        return "Content delta: description and requirement differ"
+    if desc_diff:
+        return "Content delta: description differs"
+    if req_diff:
+        return "Content delta: requirement differs"
+    return "Match"
+
+
+def judge_verdict(docx_row: Record | None, xlsm_row: Record | None, initial_status: str) -> tuple[str, str, str]:
+    judged_status = build_status_for_judge(docx_row, xlsm_row)
+    action = "adjusted" if judged_status != initial_status else "confirmed"
+    if action == "adjusted" and judged_status == "Match":
+        reason = "Adjusted: delta was only footnote/reference marker noise."
+    elif action == "adjusted":
+        reason = "Adjusted after footnote/reference stripping."
+    else:
+        reason = "Confirmed after footnote/reference stripping."
+    return judged_status, action, reason
+
+
 def compare_records(docx_records: list[Record], xlsm_records: list[Record]) -> list[dict]:
     docx_by_key = dedupe_records(docx_records)
     xlsm_by_key = dedupe_records(xlsm_records)
@@ -265,9 +307,14 @@ def compare_records(docx_records: list[Record], xlsm_records: list[Record]) -> l
         x = xlsm_by_key[key]
         matched_docx_keys.add(key)
         matched_xlsm_keys.add(key)
+        initial_status = build_status(d, x)
+        judged_status, judge_action, judge_reason = judge_verdict(d, x, initial_status)
         rows.append(
             {
-                "Status": build_status(d, x),
+                "Status": judged_status,
+                "Initial Status": initial_status,
+                "Judge Action": judge_action,
+                "Judge Reason": judge_reason,
                 "Guideline": (d.guideline_name if d else x.guideline_name),
                 "ID": d.record_id,
                 "XLSM ID": x.record_id,
@@ -316,12 +363,17 @@ def compare_records(docx_records: list[Record], xlsm_records: list[Record]) -> l
             used_x.add(j)
             d = d_left[i]
             x = x_left[j]
-            status = build_status(d, x)
+            initial_status = build_status(d, x)
+            judged_status, judge_action, judge_reason = judge_verdict(d, x, initial_status)
             if d.record_id != x.record_id:
-                status = f"{status} (fuzzy id-map)"
+                initial_status = f"{initial_status} (fuzzy id-map)"
+                judged_status = f"{judged_status} (fuzzy id-map)"
             rows.append(
                 {
-                    "Status": status,
+                    "Status": judged_status,
+                    "Initial Status": initial_status,
+                    "Judge Action": judge_action,
+                    "Judge Reason": judge_reason,
                     "Guideline": d.guideline_name,
                     "ID": d.record_id,
                     "XLSM ID": x.record_id,
@@ -342,6 +394,9 @@ def compare_records(docx_records: list[Record], xlsm_records: list[Record]) -> l
             rows.append(
                 {
                     "Status": "Missing in XLSM",
+                    "Initial Status": "Missing in XLSM",
+                    "Judge Action": "confirmed",
+                    "Judge Reason": "Confirmed missing after second-pass check.",
                     "Guideline": d.guideline_name,
                     "ID": d.record_id,
                     "XLSM ID": "",
@@ -361,6 +416,9 @@ def compare_records(docx_records: list[Record], xlsm_records: list[Record]) -> l
             rows.append(
                 {
                     "Status": "Missing in DOCX",
+                    "Initial Status": "Missing in DOCX",
+                    "Judge Action": "confirmed",
+                    "Judge Reason": "Confirmed missing after second-pass check.",
                     "Guideline": x.guideline_name,
                     "ID": x.record_id,
                     "XLSM ID": x.record_id,
@@ -379,9 +437,16 @@ def compare_records(docx_records: list[Record], xlsm_records: list[Record]) -> l
     return rows
 
 
-def write_outputs(out_xlsx: Path, out_docx_csv: Path, comparison_rows: list[dict], docx_records: list[Record]) -> None:
+def write_outputs(
+    out_xlsx: Path,
+    out_docx_csv: Path,
+    out_judge_csv: Path,
+    comparison_rows: list[dict],
+    docx_records: list[Record],
+) -> None:
     out_xlsx.parent.mkdir(parents=True, exist_ok=True)
     out_docx_csv.parent.mkdir(parents=True, exist_ok=True)
+    out_judge_csv.parent.mkdir(parents=True, exist_ok=True)
 
     deduped_docx_records = list(dedupe_records(docx_records).values())
     docx_df = pd.DataFrame(
@@ -399,8 +464,25 @@ def write_outputs(out_xlsx: Path, out_docx_csv: Path, comparison_rows: list[dict
     docx_df.to_csv(out_docx_csv, index=False)
 
     comp_df = pd.DataFrame(comparison_rows)
+    register_df = comp_df[
+        [
+            "Guideline",
+            "ID",
+            "XLSM ID",
+            "Initial Status",
+            "Status",
+            "Judge Action",
+            "Judge Reason",
+            "DOCX Control Requirement",
+            "XLSM Control Requirement",
+        ]
+    ].copy()
+    register_df["Judgment Changed"] = register_df["Initial Status"] != register_df["Status"]
+    register_df.to_csv(out_judge_csv, index=False)
+
     with pd.ExcelWriter(out_xlsx, engine="openpyxl") as writer:
         comp_df.to_excel(writer, sheet_name="id_detail_delta", index=False)
+        register_df.to_excel(writer, sheet_name="adjudication_register", index=False)
 
         ws = writer.book["id_detail_delta"]
         highlight = PatternFill(start_color="FFF4B084", end_color="FFF4B084", fill_type="solid")
@@ -459,6 +541,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="/home/runner/work/cvcodebase/cvcodebase/gh-pages-site/assets/consolidated_docx_id_tables.csv",
         help="Output CSV with parsed DOCX records",
     )
+    parser.add_argument(
+        "--out-judge-csv",
+        default="/home/runner/work/cvcodebase/cvcodebase/gh-pages-site/assets/adjudication_register.csv",
+        help="Output CSV with second-pass adjudication register",
+    )
     return parser
 
 
@@ -468,6 +555,7 @@ def main() -> None:
     xlsm_path = Path(args.xlsm).resolve()
     out_xlsx = Path(args.out_xlsx).resolve()
     out_docx_csv = Path(args.out_docx_csv).resolve()
+    out_judge_csv = Path(args.out_judge_csv).resolve()
 
     if not docx_dir.exists():
         raise FileNotFoundError(f"DOCX dir not found: {docx_dir}")
@@ -490,13 +578,14 @@ def main() -> None:
         deleted_col=args.deleted_col,
     )
     comparison_rows = compare_records(docx_records, xlsm_records)
-    write_outputs(out_xlsx, out_docx_csv, comparison_rows, docx_records)
+    write_outputs(out_xlsx, out_docx_csv, out_judge_csv, comparison_rows, docx_records)
 
     status_counts = pd.DataFrame(comparison_rows)["Status"].value_counts()
     print(f"DOCX parsed records: {len(docx_records)}")
     print(f"XLSM parsed records: {len(xlsm_records)}")
     print(status_counts.to_string())
     print(f"Wrote DOCX CSV: {out_docx_csv}")
+    print(f"Wrote adjudication register CSV: {out_judge_csv}")
     print(f"Wrote comparison XLSX: {out_xlsx}")
 
 

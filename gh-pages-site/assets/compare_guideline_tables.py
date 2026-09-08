@@ -35,6 +35,14 @@ class Record:
     control_requirement: str
 
 
+@dataclass
+class RollupRule:
+    guideline_name: str
+    guideline_key: str
+    parent_id: str
+    child_ids: list[str]
+
+
 def normalize_ws(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()
 
@@ -129,7 +137,62 @@ def pick_column(cols: list[str], explicit: str | None, candidates: Iterable[str]
 
 
 def discover_docx(path: Path) -> list[Path]:
-    return sorted(p for p in path.glob("*.docx") if "risk ai guideline" not in p.name.lower())
+    return sorted(
+        p
+        for p in path.glob("*.docx")
+        if "risk ai guideline" not in p.name.lower() and "guideline update automation" not in p.name.lower()
+    )
+
+
+def discover_rollup_docx(path: Path) -> Path | None:
+    candidates = sorted(path.glob("Guideline Update Automation*.docx"))
+    if not candidates:
+        return None
+    return candidates[-1]
+
+
+def parse_rollup_rules(automation_docx_path: Path) -> list[RollupRule]:
+    doc = Document(automation_docx_path)
+    rules: list[RollupRule] = []
+    seen: set[tuple[str, str, tuple[str, ...]]] = set()
+
+    for table in doc.tables:
+        if not table.rows:
+            continue
+        header = [normalize_ws(c.text).lower() for c in table.rows[0].cells]
+        if len(header) < 3:
+            continue
+        if "guideline name" not in header[0]:
+            continue
+        if "id in cf" not in header[1]:
+            continue
+        if "folded in" not in header[2]:
+            continue
+
+        for row in table.rows[1:]:
+            cells = [normalize_ws(c.text) for c in row.cells]
+            if len(cells) < 3:
+                continue
+            guideline_name = cells[0]
+            parent_id = normalize_id(cells[1])
+            if not guideline_name or not parent_id:
+                continue
+            child_ids = [normalize_id(x) for x in re.split(r"[,\n;]+", cells[2]) if normalize_id(x)]
+            if not child_ids:
+                continue
+            key = (normalize_guideline_name(guideline_name), parent_id, tuple(sorted(set(child_ids))))
+            if key in seen:
+                continue
+            seen.add(key)
+            rules.append(
+                RollupRule(
+                    guideline_name=guideline_name,
+                    guideline_key=normalize_guideline_name(guideline_name),
+                    parent_id=parent_id,
+                    child_ids=sorted(set(child_ids)),
+                )
+            )
+    return rules
 
 
 def parse_docx_records(docx_paths: list[Path]) -> list[Record]:
@@ -227,6 +290,67 @@ def parse_xlsm_records(
             )
         )
     return records
+
+
+def apply_rollup_rules(docx_records: list[Record], rules: list[RollupRule]) -> tuple[list[Record], list[dict]]:
+    by_key = dedupe_records(docx_records)
+    by_guideline: dict[str, dict[str, Record]] = {}
+    for (guideline_key, record_id), rec in by_key.items():
+        by_guideline.setdefault(guideline_key, {})[record_id] = rec
+
+    applied_rows: list[dict] = []
+    for rule in rules:
+        guideline_records = by_guideline.get(rule.guideline_key)
+        if not guideline_records:
+            continue
+
+        parent = guideline_records.get(rule.parent_id)
+        child_records = [guideline_records.get(cid) for cid in rule.child_ids if guideline_records.get(cid)]
+        if not child_records:
+            continue
+
+        if parent is None:
+            first = child_records[0]
+            parent = Record(
+                source=first.source,
+                guideline_name=first.guideline_name,
+                guideline_key=first.guideline_key,
+                record_id=rule.parent_id,
+                control_description=first.control_description,
+                control_requirement="",
+            )
+            guideline_records[rule.parent_id] = parent
+
+        merged_ids: list[str] = []
+        for child in child_records:
+            if child.record_id == rule.parent_id:
+                continue
+            merged_ids.append(child.record_id)
+            if child.control_description and not parent.control_description:
+                parent.control_description = child.control_description
+            child_norm = normalize_for_judge(child.control_requirement)
+            parent_norm = normalize_for_judge(parent.control_requirement)
+            if child_norm and child_norm not in parent_norm:
+                parent.control_requirement = normalize_ws(f"{parent.control_requirement} {child.control_requirement}")
+
+        for child_id in merged_ids:
+            guideline_records.pop(child_id, None)
+
+        if merged_ids:
+            applied_rows.append(
+                {
+                    "Guideline": parent.guideline_name,
+                    "Guideline Key": parent.guideline_key,
+                    "Parent ID": rule.parent_id,
+                    "Merged Child IDs": ", ".join(sorted(set(merged_ids))),
+                    "Source Rule IDs": ", ".join(rule.child_ids),
+                }
+            )
+
+    flattened: list[Record] = []
+    for records_by_id in by_guideline.values():
+        flattened.extend(records_by_id.values())
+    return flattened, applied_rows
 
 
 def dedupe_records(records: list[Record]) -> dict[tuple[str, str], Record]:
@@ -443,12 +567,15 @@ def write_outputs(
     out_xlsx: Path,
     out_docx_csv: Path,
     out_judge_csv: Path,
+    out_rollup_csv: Path,
     comparison_rows: list[dict],
     docx_records: list[Record],
+    rollup_rows: list[dict],
 ) -> None:
     out_xlsx.parent.mkdir(parents=True, exist_ok=True)
     out_docx_csv.parent.mkdir(parents=True, exist_ok=True)
     out_judge_csv.parent.mkdir(parents=True, exist_ok=True)
+    out_rollup_csv.parent.mkdir(parents=True, exist_ok=True)
 
     deduped_docx_records = list(dedupe_records(docx_records).values())
     docx_df = pd.DataFrame(
@@ -481,10 +608,12 @@ def write_outputs(
     ].copy()
     register_df["Judgment Changed"] = register_df["Initial Status"] != register_df["Status"]
     register_df.to_csv(out_judge_csv, index=False)
+    pd.DataFrame(rollup_rows).to_csv(out_rollup_csv, index=False)
 
     with pd.ExcelWriter(out_xlsx, engine="openpyxl") as writer:
         comp_df.to_excel(writer, sheet_name="id_detail_delta", index=False)
         register_df.to_excel(writer, sheet_name="adjudication_register", index=False)
+        pd.DataFrame(rollup_rows).to_excel(writer, sheet_name="rollup_exceptions_applied", index=False)
 
         ws = writer.book["id_detail_delta"]
         highlight = PatternFill(start_color="FFF4B084", end_color="FFF4B084", fill_type="solid")
@@ -548,6 +677,16 @@ def build_parser() -> argparse.ArgumentParser:
         default="/home/runner/work/cvcodebase/cvcodebase/gh-pages-site/assets/adjudication_register.csv",
         help="Output CSV with second-pass adjudication register",
     )
+    parser.add_argument(
+        "--rollup-docx",
+        default=None,
+        help="Optional Guideline Update Automation docx containing roll-up exception table",
+    )
+    parser.add_argument(
+        "--out-rollup-csv",
+        default="/home/runner/work/cvcodebase/cvcodebase/gh-pages-site/assets/rollup_exceptions_applied.csv",
+        help="Output CSV of roll-up exception mappings applied before matching",
+    )
     return parser
 
 
@@ -558,6 +697,7 @@ def main() -> None:
     out_xlsx = Path(args.out_xlsx).resolve()
     out_docx_csv = Path(args.out_docx_csv).resolve()
     out_judge_csv = Path(args.out_judge_csv).resolve()
+    out_rollup_csv = Path(args.out_rollup_csv).resolve()
 
     if not docx_dir.exists():
         raise FileNotFoundError(f"DOCX dir not found: {docx_dir}")
@@ -569,6 +709,9 @@ def main() -> None:
         raise FileNotFoundError(f"No DOCX files found in {docx_dir}")
 
     docx_records = parse_docx_records(docx_paths)
+    rollup_docx_path = Path(args.rollup_docx).resolve() if args.rollup_docx else discover_rollup_docx(docx_dir)
+    rollup_rules = parse_rollup_rules(rollup_docx_path) if rollup_docx_path and rollup_docx_path.exists() else []
+    docx_records, rollup_rows = apply_rollup_rules(docx_records, rollup_rules)
     xlsm_records = parse_xlsm_records(
         xlsm_path=xlsm_path,
         sheet_name=args.sheet,
@@ -580,7 +723,7 @@ def main() -> None:
         deleted_col=args.deleted_col,
     )
     comparison_rows = compare_records(docx_records, xlsm_records)
-    write_outputs(out_xlsx, out_docx_csv, out_judge_csv, comparison_rows, docx_records)
+    write_outputs(out_xlsx, out_docx_csv, out_judge_csv, out_rollup_csv, comparison_rows, docx_records, rollup_rows)
 
     status_counts = pd.DataFrame(comparison_rows)["Status"].value_counts()
     print(f"DOCX parsed records: {len(docx_records)}")
@@ -588,6 +731,7 @@ def main() -> None:
     print(status_counts.to_string())
     print(f"Wrote DOCX CSV: {out_docx_csv}")
     print(f"Wrote adjudication register CSV: {out_judge_csv}")
+    print(f"Wrote roll-up exception register CSV: {out_rollup_csv}")
     print(f"Wrote comparison XLSX: {out_xlsx}")
 
 

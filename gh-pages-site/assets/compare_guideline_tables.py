@@ -85,6 +85,17 @@ def normalize_guideline_name(name: str) -> str:
     n = n.replace("idp", "individual data processing")
     n = n.replace("nclc", "no low code")
     n = re.sub(r"[^a-z0-9]+", " ", n)
+    n = normalize_ws(n)
+    if n in {"idp", "idp guideline", "individual data processing guideline", "individual data processing"}:
+        n = "individual data processing no low code application governance"
+    n = n.replace(
+        "individual data processing and no low code application governance",
+        "individual data processing no low code application governance",
+    )
+    n = n.replace(
+        "individual data processing no low code app governance",
+        "individual data processing no low code application governance",
+    )
     return normalize_ws(n)
 
 

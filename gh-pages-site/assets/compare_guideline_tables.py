@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import re
+from copy import copy
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -614,6 +615,14 @@ def write_outputs(
         comp_df.to_excel(writer, sheet_name="id_detail_delta", index=False)
         register_df.to_excel(writer, sheet_name="adjudication_register", index=False)
         pd.DataFrame(rollup_rows).to_excel(writer, sheet_name="rollup_exceptions_applied", index=False)
+
+        for ws in writer.book.worksheets:
+            ws.freeze_panes = "A2"
+            ws.auto_filter.ref = ws.dimensions
+            for cell in ws[1]:
+                font = copy(cell.font)
+                font.size = 14
+                cell.font = font
 
         ws = writer.book["id_detail_delta"]
         highlight = PatternFill(start_color="FFF4B084", end_color="FFF4B084", fill_type="solid")

@@ -283,6 +283,8 @@ def build_status_for_judge(docx_row: Record | None, xlsm_row: Record | None) -> 
 
 
 def judge_verdict(docx_row: Record | None, xlsm_row: Record | None, initial_status: str) -> tuple[str, str, str]:
+    if initial_status == "Match":
+        return "Match", "skipped", "Skipped second-pass adjudication because first-pass is an exact match."
     judged_status = build_status_for_judge(docx_row, xlsm_row)
     action = "adjusted" if judged_status != initial_status else "confirmed"
     if action == "adjusted" and judged_status == "Match":

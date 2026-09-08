@@ -15,7 +15,7 @@ from openpyxl.styles import PatternFill
 
 
 SECTION_ID_PATTERN = re.compile(r"^ID\s*:\s*([A-Za-z0-9][A-Za-z0-9.\-]*)", re.IGNORECASE)
-ROW_ID_PATTERN = re.compile(r"^\s*([A-Za-z0-9]+(?:[.\-][A-Za-z0-9]+)*)\b")
+ROW_ID_PATTERN = re.compile(r"^\s*(\d+(?:[.\-][A-Za-z0-9]+)*)\b")
 MULTI_NUMERIC_ID_LINE_PATTERN = re.compile(r"(?m)^\s*(\d+(?:\.\d+)*)\s*$")
 VERSION_PATTERN = re.compile(r"(?:^|[\s_\-])v(?:ersion)?\s*\d+(?:\.\d+)*$", re.IGNORECASE)
 REMOVE_AFTER_MARKERS = (
@@ -220,6 +220,43 @@ def parse_rollup_rules(automation_docx_path: Path) -> list[RollupRule]:
 
 def parse_docx_records(docx_paths: list[Path]) -> list[Record]:
     records: list[Record] = []
+
+    def is_id_like_text(raw_text: str) -> bool:
+        t = normalize_ws(raw_text)
+        if not t:
+            return False
+        if SECTION_ID_PATTERN.search(t):
+            return True
+        if MULTI_NUMERIC_ID_LINE_PATTERN.findall(raw_text):
+            return True
+        if ROW_ID_PATTERN.match(t) and len(t) < 80:
+            return True
+        return False
+
+    def requirement_score(raw_text: str) -> int:
+        if is_id_like_text(raw_text):
+            return -1
+        t = normalize_ws(raw_text)
+        alpha_count = sum(ch.isalpha() for ch in t)
+        if alpha_count == 0:
+            return -1
+        return alpha_count
+
+    def requirement_lines_from_raw(raw_text: str) -> list[str]:
+        lines: list[str] = []
+        for line in raw_text.splitlines():
+            normalized_line = normalize_ws(line)
+            if not normalized_line:
+                continue
+            if any(normalized_line.lower().startswith(marker) for marker in REMOVE_AFTER_MARKERS):
+                break
+            if SECTION_ID_PATTERN.search(normalized_line):
+                continue
+            if ROW_ID_PATTERN.match(normalized_line) and " " not in normalized_line and "." in normalized_line:
+                continue
+            lines.append(normalized_line)
+        return lines
+
     for docx_path in docx_paths:
         guideline_name = re.sub(r"_final$", "", docx_path.stem, flags=re.IGNORECASE)
         guideline_key = normalize_guideline_name(guideline_name)
@@ -228,6 +265,7 @@ def parse_docx_records(docx_paths: list[Path]) -> list[Record]:
         for table in doc.tables:
             if not table.rows or len(table.columns) < 2:
                 continue
+            first_row_raw = [c.text for c in table.rows[0].cells]
             first_row = [normalize_ws(c.text) for c in table.rows[0].cells]
             if len(first_row) < 2:
                 continue
@@ -236,33 +274,67 @@ def parse_docx_records(docx_paths: list[Path]) -> list[Record]:
             section_match = SECTION_ID_PATTERN.search(first_row[0])
             if not section_match:
                 continue
-            section_description = normalize_ws(first_row[1])
+            non_id_header_cells = [normalize_ws(x) for x in first_row_raw if normalize_ws(x) and not is_id_like_text(x)]
+            section_description = non_id_header_cells[0] if non_id_header_cells else normalize_ws(first_row[1])
             previous_record: Record | None = None
 
             for row in table.rows[1:]:
-                raw_left = row.cells[0].text
-                raw_right = row.cells[1].text
+                raw_cells = [c.text for c in row.cells]
                 cells = [normalize_ws(c.text) for c in row.cells]
                 if len(cells) < 2:
                     continue
-                left = cells[0]
-                right = cells[1]
-                if not left and not right:
+                if not any(cells):
                     continue
-                if "<" in left.lower() and "specify" in left.lower():
+                if "<" in cells[0].lower() and "specify" in cells[0].lower():
                     continue
-                multi_ids = [normalize_id(x) for x in MULTI_NUMERIC_ID_LINE_PATTERN.findall(raw_left)]
-                if len(multi_ids) > 1:
-                    content_lines: list[str] = []
-                    for line in raw_right.splitlines():
-                        normalized_line = normalize_ws(line)
-                        if not normalized_line:
-                            continue
-                        if any(normalized_line.lower().startswith(marker) for marker in REMOVE_AFTER_MARKERS):
+                if any(SECTION_ID_PATTERN.search(cell) for cell in cells):
+                    row_non_id_cells = [normalize_ws(x) for x in raw_cells if normalize_ws(x) and not is_id_like_text(x)]
+                    if row_non_id_cells:
+                        section_description = row_non_id_cells[0]
+                    continue
+                id_cell_idx = None
+                multi_ids: list[str] = []
+                for idx, raw_cell in enumerate(raw_cells):
+                    ids = [normalize_id(x) for x in MULTI_NUMERIC_ID_LINE_PATTERN.findall(raw_cell)]
+                    if ids:
+                        id_cell_idx = idx
+                        multi_ids = ids
+                        break
+
+                if id_cell_idx is None:
+                    for idx, cell_text in enumerate(cells):
+                        m = ROW_ID_PATTERN.match(cell_text)
+                        if m:
+                            id_cell_idx = idx
+                            multi_ids = [normalize_id(m.group(1))]
                             break
-                        content_lines.append(normalized_line)
+
+                if id_cell_idx is None:
+                    if previous_record:
+                        continuation_parts = [
+                            normalize_ws(raw)
+                            for i, raw in enumerate(raw_cells)
+                            if i != 0 and normalize_ws(raw) and not is_id_like_text(raw)
+                        ]
+                        if continuation_parts:
+                            continuation = clean_requirement_text(" ".join(continuation_parts))
+                            if continuation:
+                                previous_record.control_requirement = normalize_ws(
+                                    f"{previous_record.control_requirement} {continuation}"
+                                )
+                    continue
+
+                req_candidates = [i for i in range(len(raw_cells)) if i != id_cell_idx]
+                req_cell_idx = max(req_candidates, key=lambda i: requirement_score(raw_cells[i])) if req_candidates else None
+                req_raw = raw_cells[req_cell_idx] if req_cell_idx is not None else ""
+
+                if SECTION_ID_PATTERN.search(cells[id_cell_idx]):
+                    continue
+
+                if len(multi_ids) > 1:
+                    content_lines = requirement_lines_from_raw(req_raw)
                     if not content_lines:
-                        content_lines = [normalize_ws(raw_right)]
+                        content_lines = [normalize_ws(req_raw)]
                     for idx, rid in enumerate(multi_ids):
                         requirement_src = content_lines[idx] if idx < len(content_lines) else content_lines[-1]
                         requirement = clean_requirement_text(requirement_src)
@@ -277,11 +349,12 @@ def parse_docx_records(docx_paths: list[Path]) -> list[Record]:
                         records.append(rec)
                         previous_record = rec
                     continue
-                id_match = ROW_ID_PATTERN.match(left)
+                id_match = ROW_ID_PATTERN.match(cells[id_cell_idx])
 
                 if id_match:
                     record_id = normalize_id(id_match.group(1))
-                    requirement = clean_requirement_text(right)
+                    req_lines = requirement_lines_from_raw(req_raw)
+                    requirement = clean_requirement_text(" ".join(req_lines) if req_lines else req_raw)
                     if not record_id or record_id == "ID":
                         continue
                     rec = Record(
@@ -295,7 +368,12 @@ def parse_docx_records(docx_paths: list[Path]) -> list[Record]:
                     records.append(rec)
                     previous_record = rec
                 elif previous_record:
-                    continuation = clean_requirement_text(" ".join([left, right]).strip())
+                    continuation_parts = [
+                        normalize_ws(raw)
+                        for i, raw in enumerate(raw_cells)
+                        if i != id_cell_idx and normalize_ws(raw) and not is_id_like_text(raw)
+                    ]
+                    continuation = clean_requirement_text(" ".join(continuation_parts).strip())
                     if continuation:
                         previous_record.control_requirement = normalize_ws(
                             f"{previous_record.control_requirement} {continuation}"
@@ -402,6 +480,50 @@ def apply_rollup_rules(docx_records: list[Record], rules: list[RollupRule]) -> t
     for records_by_id in by_guideline.values():
         flattened.extend(records_by_id.values())
     return flattened, applied_rows
+
+
+def build_docx_allocation_qa(docx_records: list[Record]) -> list[dict]:
+    qa_rows: list[dict] = []
+    for r in docx_records:
+        reasons: list[str] = []
+        req = normalize_ws(r.control_requirement)
+        desc = normalize_ws(r.control_description)
+        req_l = req.lower()
+        desc_l = desc.lower()
+
+        if not req:
+            reasons.append("empty requirement")
+        if len(req) < 24:
+            reasons.append("very short requirement")
+        if "dor.ict." in req_l:
+            reasons.append("requirement contains control-code pattern")
+        if re.search(r"^\d+(?:\.\d+)*\s*$", req):
+            reasons.append("requirement looks like bare ID")
+        if req and desc and normalize_for_judge(req) == normalize_for_judge(desc):
+            reasons.append("description equals requirement")
+        if len(desc) > 180 and len(req) < 40:
+            reasons.append("possible description/requirement misallocation")
+
+        if reasons:
+            qa_rows.append(
+                {
+                    "Guideline": r.guideline_name,
+                    "ID": r.record_id,
+                    "Control Description": desc,
+                    "Control Requirement": req,
+                    "QA Reasons": "; ".join(reasons),
+                }
+            )
+    return qa_rows
+
+
+DOCX_QA_COLUMNS = [
+    "Guideline",
+    "ID",
+    "Control Description",
+    "Control Requirement",
+    "QA Reasons",
+]
 
 
 def dedupe_records(records: list[Record]) -> dict[tuple[str, str], Record]:
@@ -619,14 +741,17 @@ def write_outputs(
     out_docx_csv: Path,
     out_judge_csv: Path,
     out_rollup_csv: Path,
+    out_docx_qa_csv: Path,
     comparison_rows: list[dict],
     docx_records: list[Record],
     rollup_rows: list[dict],
+    docx_qa_rows: list[dict],
 ) -> None:
     out_xlsx.parent.mkdir(parents=True, exist_ok=True)
     out_docx_csv.parent.mkdir(parents=True, exist_ok=True)
     out_judge_csv.parent.mkdir(parents=True, exist_ok=True)
     out_rollup_csv.parent.mkdir(parents=True, exist_ok=True)
+    out_docx_qa_csv.parent.mkdir(parents=True, exist_ok=True)
 
     deduped_docx_records = list(dedupe_records(docx_records).values())
     docx_df = pd.DataFrame(
@@ -660,11 +785,14 @@ def write_outputs(
     register_df["Judgment Changed"] = register_df["Initial Status"] != register_df["Status"]
     register_df.to_csv(out_judge_csv, index=False)
     pd.DataFrame(rollup_rows).to_csv(out_rollup_csv, index=False)
+    qa_df = pd.DataFrame(docx_qa_rows, columns=DOCX_QA_COLUMNS)
+    qa_df.to_csv(out_docx_qa_csv, index=False)
 
     with pd.ExcelWriter(out_xlsx, engine="openpyxl") as writer:
         comp_df.to_excel(writer, sheet_name="id_detail_delta", index=False)
         register_df.to_excel(writer, sheet_name="adjudication_register", index=False)
         pd.DataFrame(rollup_rows).to_excel(writer, sheet_name="rollup_exceptions_applied", index=False)
+        qa_df.to_excel(writer, sheet_name="docx_allocation_qa", index=False)
 
         for ws in writer.book.worksheets:
             ws.freeze_panes = "A2"
@@ -752,6 +880,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="/home/runner/work/cvcodebase/cvcodebase/gh-pages-site/assets/rollup_exceptions_applied.csv",
         help="Output CSV of roll-up exception mappings applied before matching",
     )
+    parser.add_argument(
+        "--out-docx-qa-csv",
+        default="/home/runner/work/cvcodebase/cvcodebase/gh-pages-site/assets/docx_allocation_qa.csv",
+        help="Output CSV with QA flags for gross DOCX control allocation issues",
+    )
     return parser
 
 
@@ -763,6 +896,7 @@ def main() -> None:
     out_docx_csv = Path(args.out_docx_csv).resolve()
     out_judge_csv = Path(args.out_judge_csv).resolve()
     out_rollup_csv = Path(args.out_rollup_csv).resolve()
+    out_docx_qa_csv = Path(args.out_docx_qa_csv).resolve()
 
     if not docx_dir.exists():
         raise FileNotFoundError(f"DOCX dir not found: {docx_dir}")
@@ -777,6 +911,7 @@ def main() -> None:
     rollup_docx_path = Path(args.rollup_docx).resolve() if args.rollup_docx else discover_rollup_docx(docx_dir)
     rollup_rules = parse_rollup_rules(rollup_docx_path) if rollup_docx_path and rollup_docx_path.exists() else []
     docx_records, rollup_rows = apply_rollup_rules(docx_records, rollup_rules)
+    docx_qa_rows = build_docx_allocation_qa(docx_records)
     xlsm_records = parse_xlsm_records(
         xlsm_path=xlsm_path,
         sheet_name=args.sheet,
@@ -788,7 +923,17 @@ def main() -> None:
         deleted_col=args.deleted_col,
     )
     comparison_rows = compare_records(docx_records, xlsm_records)
-    write_outputs(out_xlsx, out_docx_csv, out_judge_csv, out_rollup_csv, comparison_rows, docx_records, rollup_rows)
+    write_outputs(
+        out_xlsx,
+        out_docx_csv,
+        out_judge_csv,
+        out_rollup_csv,
+        out_docx_qa_csv,
+        comparison_rows,
+        docx_records,
+        rollup_rows,
+        docx_qa_rows,
+    )
 
     status_counts = pd.DataFrame(comparison_rows)["Status"].value_counts()
     print(f"DOCX parsed records: {len(docx_records)}")
@@ -797,6 +942,7 @@ def main() -> None:
     print(f"Wrote DOCX CSV: {out_docx_csv}")
     print(f"Wrote adjudication register CSV: {out_judge_csv}")
     print(f"Wrote roll-up exception register CSV: {out_rollup_csv}")
+    print(f"Wrote DOCX allocation QA CSV: {out_docx_qa_csv}")
     print(f"Wrote comparison XLSX: {out_xlsx}")
 
 

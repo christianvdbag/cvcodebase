@@ -127,6 +127,16 @@ def normalize_footnote_tokens(text: str) -> str:
     return normalize_ws(t)
 
 
+def strip_trailing_footnote_text(text: str) -> str:
+    t = normalize_ws(text)
+    t = re.sub(
+        r"(?i)(?<=[\.\)])\s*\[\d{1,3}\]\s*(?:the|this|future)\b.*$",
+        "",
+        t,
+    )
+    return normalize_ws(t)
+
+
 def clean_requirement_text(text: str) -> str:
     t = normalize_ws(text)
     t = t.replace("  ", " ")
@@ -327,7 +337,7 @@ def parse_xlsm_records(
                 guideline_key=normalize_guideline_name(guideline),
                 record_id=record_id,
                 control_description=normalize_footnote_tokens(row[d_col]),
-                control_requirement=normalize_footnote_tokens(row[r_col]),
+                control_requirement=strip_trailing_footnote_text(normalize_footnote_tokens(row[r_col])),
             )
         )
     return records

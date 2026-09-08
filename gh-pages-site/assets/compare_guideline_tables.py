@@ -16,6 +16,7 @@ from openpyxl.styles import PatternFill
 
 SECTION_ID_PATTERN = re.compile(r"^ID\s*:\s*([A-Za-z0-9][A-Za-z0-9.\-]*)", re.IGNORECASE)
 ROW_ID_PATTERN = re.compile(r"^\s*([A-Za-z0-9]+(?:[.\-][A-Za-z0-9]+)*)\b")
+MULTI_NUMERIC_ID_LINE_PATTERN = re.compile(r"(?m)^\s*(\d+(?:\.\d+)*)\s*$")
 VERSION_PATTERN = re.compile(r"(?:^|[\s_\-])v(?:ersion)?\s*\d+(?:\.\d+)*$", re.IGNORECASE)
 REMOVE_AFTER_MARKERS = (
     "asset-types:",
@@ -218,6 +219,8 @@ def parse_docx_records(docx_paths: list[Path]) -> list[Record]:
             previous_record: Record | None = None
 
             for row in table.rows[1:]:
+                raw_left = row.cells[0].text
+                raw_right = row.cells[1].text
                 cells = [normalize_ws(c.text) for c in row.cells]
                 if len(cells) < 2:
                     continue
@@ -226,6 +229,32 @@ def parse_docx_records(docx_paths: list[Path]) -> list[Record]:
                 if not left and not right:
                     continue
                 if "<" in left.lower() and "specify" in left.lower():
+                    continue
+                multi_ids = [normalize_id(x) for x in MULTI_NUMERIC_ID_LINE_PATTERN.findall(raw_left)]
+                if len(multi_ids) > 1:
+                    content_lines: list[str] = []
+                    for line in raw_right.splitlines():
+                        normalized_line = normalize_ws(line)
+                        if not normalized_line:
+                            continue
+                        if any(normalized_line.lower().startswith(marker) for marker in REMOVE_AFTER_MARKERS):
+                            break
+                        content_lines.append(normalized_line)
+                    if not content_lines:
+                        content_lines = [normalize_ws(raw_right)]
+                    for idx, rid in enumerate(multi_ids):
+                        requirement_src = content_lines[idx] if idx < len(content_lines) else content_lines[-1]
+                        requirement = clean_requirement_text(requirement_src)
+                        rec = Record(
+                            source="docx",
+                            guideline_name=guideline_name,
+                            guideline_key=guideline_key,
+                            record_id=rid,
+                            control_description=section_description,
+                            control_requirement=requirement,
+                        )
+                        records.append(rec)
+                        previous_record = rec
                     continue
                 id_match = ROW_ID_PATTERN.match(left)
 
@@ -625,31 +654,37 @@ def write_outputs(
                 cell.font = font
 
         ws = writer.book["id_detail_delta"]
+        header_idx = {str(ws.cell(row=1, column=i).value): i for i in range(1, ws.max_column + 1)}
+        status_col = header_idx["Status"]
+        docx_desc_col = header_idx["DOCX Control Description"]
+        docx_req_col = header_idx["DOCX Control Requirement"]
+        xlsm_desc_col = header_idx["XLSM Control Description"]
+        xlsm_req_col = header_idx["XLSM Control Requirement"]
         highlight = PatternFill(start_color="FFF4B084", end_color="FFF4B084", fill_type="solid")
         for row_idx, row in enumerate(comparison_rows, start=2):
             status = row["Status"]
             if status.startswith("Missing in DOCX"):
-                ws.cell(row=row_idx, column=1).fill = highlight
-                ws.cell(row=row_idx, column=5).fill = highlight
-                ws.cell(row=row_idx, column=6).fill = highlight
+                ws.cell(row=row_idx, column=status_col).fill = highlight
+                ws.cell(row=row_idx, column=docx_desc_col).fill = highlight
+                ws.cell(row=row_idx, column=docx_req_col).fill = highlight
             elif status.startswith("Missing in XLSM"):
-                ws.cell(row=row_idx, column=1).fill = highlight
-                ws.cell(row=row_idx, column=7).fill = highlight
-                ws.cell(row=row_idx, column=8).fill = highlight
+                ws.cell(row=row_idx, column=status_col).fill = highlight
+                ws.cell(row=row_idx, column=xlsm_desc_col).fill = highlight
+                ws.cell(row=row_idx, column=xlsm_req_col).fill = highlight
             elif "description and requirement differ" in status:
-                ws.cell(row=row_idx, column=1).fill = highlight
-                ws.cell(row=row_idx, column=5).fill = highlight
-                ws.cell(row=row_idx, column=6).fill = highlight
-                ws.cell(row=row_idx, column=7).fill = highlight
-                ws.cell(row=row_idx, column=8).fill = highlight
+                ws.cell(row=row_idx, column=status_col).fill = highlight
+                ws.cell(row=row_idx, column=docx_desc_col).fill = highlight
+                ws.cell(row=row_idx, column=docx_req_col).fill = highlight
+                ws.cell(row=row_idx, column=xlsm_desc_col).fill = highlight
+                ws.cell(row=row_idx, column=xlsm_req_col).fill = highlight
             elif "description differs" in status:
-                ws.cell(row=row_idx, column=1).fill = highlight
-                ws.cell(row=row_idx, column=5).fill = highlight
-                ws.cell(row=row_idx, column=7).fill = highlight
+                ws.cell(row=row_idx, column=status_col).fill = highlight
+                ws.cell(row=row_idx, column=docx_desc_col).fill = highlight
+                ws.cell(row=row_idx, column=xlsm_desc_col).fill = highlight
             elif "requirement differs" in status:
-                ws.cell(row=row_idx, column=1).fill = highlight
-                ws.cell(row=row_idx, column=6).fill = highlight
-                ws.cell(row=row_idx, column=8).fill = highlight
+                ws.cell(row=row_idx, column=status_col).fill = highlight
+                ws.cell(row=row_idx, column=docx_req_col).fill = highlight
+                ws.cell(row=row_idx, column=xlsm_req_col).fill = highlight
 
 
 def build_parser() -> argparse.ArgumentParser:

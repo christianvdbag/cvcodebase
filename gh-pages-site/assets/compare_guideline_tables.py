@@ -258,6 +258,27 @@ def parse_docx_records(docx_paths: list[Path]) -> list[Record]:
             lines.append(normalized_line)
         return lines
 
+    def is_decorative_blank_id_row(raw_cells: list[str]) -> bool:
+        if not raw_cells:
+            return False
+        if normalize_ws(raw_cells[0]):
+            return False
+        non_id_cells = [normalize_ws(x) for x in raw_cells[1:] if normalize_ws(x)]
+        if len(non_id_cells) != 1:
+            return False
+        text = non_id_cells[0]
+        if len(text) > 90:
+            return False
+        if text.endswith((".", ":", ";", "?", "!", ",")):
+            return False
+        if re.search(r"\b(asset[- ]types?|key references?|regulatory)\b", text, flags=re.IGNORECASE):
+            return False
+        if len(text.split()) > 10:
+            return False
+        if text.lower() == text:
+            return False
+        return True
+
     for docx_path in docx_paths:
         guideline_name = re.sub(r"_final$", "", docx_path.stem, flags=re.IGNORECASE)
         guideline_key = normalize_guideline_name(guideline_name)
@@ -311,6 +332,8 @@ def parse_docx_records(docx_paths: list[Path]) -> list[Record]:
                             break
 
                 if id_cell_idx is None:
+                    if is_decorative_blank_id_row(raw_cells):
+                        continue
                     if previous_record:
                         continuation_parts = [
                             normalize_ws(raw)

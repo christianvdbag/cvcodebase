@@ -158,6 +158,49 @@ def equivalent_requirement_text(a: str, b: str, is_exception_parent: bool) -> bo
     return False
 
 
+def id_lineage(record_id: str) -> list[str]:
+    rid = normalize_id(record_id)
+    if not rid:
+        return []
+    lineage = [rid]
+    current = rid
+    while "." in current:
+        current = current.rsplit(".", 1)[0]
+        if current and current not in lineage:
+            lineage.append(current)
+    return lineage
+
+
+def ids_are_related(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+    la = set(id_lineage(a))
+    lb = set(id_lineage(b))
+    return bool(la & lb)
+
+
+def find_missing_source_match(target: Record, candidates: list[Record]) -> Record | None:
+    best: Record | None = None
+    best_score = -1.0
+    for candidate in candidates:
+        if not ids_are_related(target.record_id, candidate.record_id):
+            continue
+        req_eq = equivalent_requirement_text(candidate.control_requirement, target.control_requirement, False)
+        desc_eq = equivalent_requirement_text(candidate.control_description, target.control_description, False)
+        if not req_eq:
+            continue
+        if not desc_eq and normalize_for_compare(candidate.control_description) and normalize_for_compare(target.control_description):
+            continue
+        req_score = score_text(candidate.control_requirement, target.control_requirement)
+        desc_score = score_text(candidate.control_description, target.control_description)
+        exact_bonus = 0.05 if normalize_id(candidate.record_id) == normalize_id(target.record_id) else 0.0
+        score = req_score * 0.9 + desc_score * 0.1 + exact_bonus
+        if score > best_score:
+            best = candidate
+            best_score = score
+    return best
+
+
 def normalize_guideline_name(name: str) -> str:
     n = normalize_ws(name)
     n = re.sub(r"\.(pdf|docx)$", "", n, flags=re.IGNORECASE)
@@ -773,6 +816,12 @@ def compare_records(
 
     docx_by_guideline: dict[str, list[Record]] = {}
     xlsm_by_guideline: dict[str, list[Record]] = {}
+    docx_all_by_guideline: dict[str, list[Record]] = {}
+    xlsm_all_by_guideline: dict[str, list[Record]] = {}
+    for r in docx_by_key.values():
+        docx_all_by_guideline.setdefault(r.guideline_key, []).append(r)
+    for r in xlsm_by_key.values():
+        xlsm_all_by_guideline.setdefault(r.guideline_key, []).append(r)
     for key, r in docx_by_key.items():
         if key in matched_docx_keys:
             continue
@@ -835,6 +884,36 @@ def compare_records(
         for i, d in enumerate(d_left):
             if i in used_d:
                 continue
+            source_match = find_missing_source_match(d, xlsm_all_by_guideline.get(guideline_key, []))
+            if source_match:
+                initial_status = "Missing in XLSM"
+                is_exception_parent = (d.guideline_key, d.record_id) in exception_parent_keys
+                judged_status = build_status_for_judge(d, source_match, is_exception_parent=is_exception_parent)
+                if normalize_id(d.record_id) != normalize_id(source_match.record_id):
+                    judged_status = f"{judged_status} (fuzzy id-map)"
+                rows.append(
+                    {
+                        "Status": judged_status,
+                        "Initial Status": initial_status,
+                        "Judge Action": "adjusted",
+                        "Judge Reason": "Adjusted: missing in XLSM resolved via source ID lookup.",
+                        "Guideline": d.guideline_name,
+                        "ID": d.record_id,
+                        "XLSM ID": source_match.record_id,
+                        "DOCX Control Description": d.control_description,
+                        "DOCX Control Requirement": d.control_requirement,
+                        "Requirement Delta": requirement_delta_string(
+                            d.control_requirement, source_match.control_requirement
+                        ),
+                        "XLSM Control Description": source_match.control_description,
+                        "XLSM Control Requirement": source_match.control_requirement,
+                        "DOCX Guideline Name": d.guideline_name,
+                        "XLSM Guideline Name": source_match.guideline_name,
+                        "DOCX Guideline Key": d.guideline_key,
+                        "XLSM Guideline Key": source_match.guideline_key,
+                    }
+                )
+                continue
             rows.append(
                 {
                     "Status": "Missing in XLSM",
@@ -857,6 +936,36 @@ def compare_records(
             )
         for j, x in enumerate(x_left):
             if j in used_x:
+                continue
+            source_match = find_missing_source_match(x, docx_all_by_guideline.get(guideline_key, []))
+            if source_match:
+                initial_status = "Missing in DOCX"
+                is_exception_parent = (source_match.guideline_key, source_match.record_id) in exception_parent_keys
+                judged_status = build_status_for_judge(source_match, x, is_exception_parent=is_exception_parent)
+                if normalize_id(source_match.record_id) != normalize_id(x.record_id):
+                    judged_status = f"{judged_status} (fuzzy id-map)"
+                rows.append(
+                    {
+                        "Status": judged_status,
+                        "Initial Status": initial_status,
+                        "Judge Action": "adjusted",
+                        "Judge Reason": "Adjusted: missing in DOCX resolved via source ID lookup.",
+                        "Guideline": x.guideline_name,
+                        "ID": source_match.record_id,
+                        "XLSM ID": x.record_id,
+                        "DOCX Control Description": source_match.control_description,
+                        "DOCX Control Requirement": source_match.control_requirement,
+                        "Requirement Delta": requirement_delta_string(
+                            source_match.control_requirement, x.control_requirement
+                        ),
+                        "XLSM Control Description": x.control_description,
+                        "XLSM Control Requirement": x.control_requirement,
+                        "DOCX Guideline Name": source_match.guideline_name,
+                        "XLSM Guideline Name": x.guideline_name,
+                        "DOCX Guideline Key": source_match.guideline_key,
+                        "XLSM Guideline Key": x.guideline_key,
+                    }
+                )
                 continue
             rows.append(
                 {

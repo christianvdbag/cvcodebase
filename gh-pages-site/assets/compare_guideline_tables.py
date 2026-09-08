@@ -50,7 +50,7 @@ def normalize_ws(text: str) -> str:
 
 
 def normalize_for_compare(text: str) -> str:
-    t = normalize_ws(text).lower()
+    t = strip_footnote_markers(text).lower()
     return re.sub(r"[^a-z0-9]+", "", t)
 
 
@@ -59,6 +59,7 @@ def strip_footnote_markers(text: str) -> str:
     t = normalize_footnote_tokens(t)
     t = re.sub(r"\[\s*\d{1,3}\s*\]", " ", t)
     t = re.sub(r"\(\s*\d{1,3}\s*\)", " ", t)
+    t = re.sub(r'(?<=[A-Za-z"”\'\)])\s*\d{1,2}(?=(?:\s|[,\.;:\)\]"”]|$))', " ", t)
     t = re.sub(r"\s+", " ", t).strip()
     return t
 

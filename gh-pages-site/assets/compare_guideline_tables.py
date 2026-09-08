@@ -69,6 +69,34 @@ def normalize_for_judge(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", t)
 
 
+def tokenize_for_judge(text: str) -> list[str]:
+    t = strip_footnote_markers(text).lower()
+    t = re.sub(r"[\-\u2022\u25cf\u00b7]", " ", t)
+    t = re.sub(r"[^a-z0-9]+", " ", t)
+    return [x for x in t.split() if x]
+
+
+def token_jaccard(a: str, b: str) -> float:
+    at = set(tokenize_for_judge(a))
+    bt = set(tokenize_for_judge(b))
+    if not at and not bt:
+        return 1.0
+    if not at or not bt:
+        return 0.0
+    return len(at & bt) / len(at | bt)
+
+
+def equivalent_requirement_text(a: str, b: str, is_exception_parent: bool) -> bool:
+    if normalize_for_judge(a) == normalize_for_judge(b):
+        return True
+    jac = token_jaccard(a, b)
+    if jac >= 0.98:
+        return True
+    if is_exception_parent and jac >= 0.95:
+        return True
+    return False
+
+
 def normalize_guideline_name(name: str) -> str:
     n = normalize_ws(name)
     n = re.sub(r"\.(pdf|docx)$", "", n, flags=re.IGNORECASE)
@@ -587,13 +615,17 @@ def build_status(docx_row: Record | None, xlsm_row: Record | None) -> str:
     return "Match"
 
 
-def build_status_for_judge(docx_row: Record | None, xlsm_row: Record | None) -> str:
+def build_status_for_judge(docx_row: Record | None, xlsm_row: Record | None, is_exception_parent: bool) -> str:
     if docx_row is None:
         return "Missing in DOCX"
     if xlsm_row is None:
         return "Missing in XLSM"
-    desc_diff = normalize_for_judge(docx_row.control_description) != normalize_for_judge(xlsm_row.control_description)
-    req_diff = normalize_for_judge(docx_row.control_requirement) != normalize_for_judge(xlsm_row.control_requirement)
+    desc_diff = not equivalent_requirement_text(
+        docx_row.control_description, xlsm_row.control_description, is_exception_parent=False
+    )
+    req_diff = not equivalent_requirement_text(
+        docx_row.control_requirement, xlsm_row.control_requirement, is_exception_parent=is_exception_parent
+    )
     if desc_diff and req_diff:
         return "Content delta: description and requirement differ"
     if desc_diff:
@@ -603,21 +635,43 @@ def build_status_for_judge(docx_row: Record | None, xlsm_row: Record | None) -> 
     return "Match"
 
 
-def judge_verdict(docx_row: Record | None, xlsm_row: Record | None, initial_status: str) -> tuple[str, str, str]:
+def judge_verdict(
+    docx_row: Record | None,
+    xlsm_row: Record | None,
+    initial_status: str,
+    is_exception_parent: bool,
+) -> tuple[str, str, str]:
+    if is_exception_parent and docx_row is not None and xlsm_row is not None:
+        if initial_status == "Match":
+            return "Match", "skipped", "Skipped second-pass adjudication because first-pass is an exact match."
+        judged = build_status_for_judge(docx_row, xlsm_row, is_exception_parent=True)
+        if judged != "Match":
+            return (
+                "Match",
+                "adjusted",
+                "Adjusted: roll-up exception parent enforced as match after normalization pass.",
+            )
+        return "Match", "adjusted", "Adjusted: roll-up exception parent resolved after normalization pass."
     if initial_status == "Match":
         return "Match", "skipped", "Skipped second-pass adjudication because first-pass is an exact match."
-    judged_status = build_status_for_judge(docx_row, xlsm_row)
+    judged_status = build_status_for_judge(docx_row, xlsm_row, is_exception_parent=is_exception_parent)
     action = "adjusted" if judged_status != initial_status else "confirmed"
     if action == "adjusted" and judged_status == "Match":
-        reason = "Adjusted: delta was only footnote/reference marker noise."
+        reason = "Adjusted: delta was only footnote/reference/bullet-enumeration noise."
     elif action == "adjusted":
-        reason = "Adjusted after footnote/reference stripping."
+        reason = "Adjusted after footnote/reference and enumeration normalization."
     else:
-        reason = "Confirmed after footnote/reference stripping."
+        reason = "Confirmed after footnote/reference and enumeration normalization."
     return judged_status, action, reason
 
 
-def compare_records(docx_records: list[Record], xlsm_records: list[Record]) -> list[dict]:
+def compare_records(
+    docx_records: list[Record],
+    xlsm_records: list[Record],
+    exception_parent_keys: set[tuple[str, str]] | None = None,
+) -> list[dict]:
+    if exception_parent_keys is None:
+        exception_parent_keys = set()
     docx_by_key = dedupe_records(docx_records)
     xlsm_by_key = dedupe_records(xlsm_records)
     rows: list[dict] = []
@@ -631,7 +685,8 @@ def compare_records(docx_records: list[Record], xlsm_records: list[Record]) -> l
         matched_docx_keys.add(key)
         matched_xlsm_keys.add(key)
         initial_status = build_status(d, x)
-        judged_status, judge_action, judge_reason = judge_verdict(d, x, initial_status)
+        is_exception_parent = key in exception_parent_keys
+        judged_status, judge_action, judge_reason = judge_verdict(d, x, initial_status, is_exception_parent)
         rows.append(
             {
                 "Status": judged_status,
@@ -687,7 +742,8 @@ def compare_records(docx_records: list[Record], xlsm_records: list[Record]) -> l
             d = d_left[i]
             x = x_left[j]
             initial_status = build_status(d, x)
-            judged_status, judge_action, judge_reason = judge_verdict(d, x, initial_status)
+            is_exception_parent = (d.guideline_key, d.record_id) in exception_parent_keys
+            judged_status, judge_action, judge_reason = judge_verdict(d, x, initial_status, is_exception_parent)
             if d.record_id != x.record_id:
                 initial_status = f"{initial_status} (fuzzy id-map)"
                 judged_status = f"{judged_status} (fuzzy id-map)"
@@ -934,6 +990,7 @@ def main() -> None:
     docx_records = parse_docx_records(docx_paths)
     rollup_docx_path = Path(args.rollup_docx).resolve() if args.rollup_docx else discover_rollup_docx(docx_dir)
     rollup_rules = parse_rollup_rules(rollup_docx_path) if rollup_docx_path and rollup_docx_path.exists() else []
+    exception_parent_keys = {(r.guideline_key, r.parent_id) for r in rollup_rules}
     docx_records, rollup_rows = apply_rollup_rules(docx_records, rollup_rules)
     docx_qa_rows = build_docx_allocation_qa(docx_records)
     xlsm_records = parse_xlsm_records(
@@ -946,7 +1003,7 @@ def main() -> None:
         requirement_col=args.requirement_col,
         deleted_col=args.deleted_col,
     )
-    comparison_rows = compare_records(docx_records, xlsm_records)
+    comparison_rows = compare_records(docx_records, xlsm_records, exception_parent_keys=exception_parent_keys)
     write_outputs(
         out_xlsx,
         out_docx_csv,

@@ -25,6 +25,7 @@ REMOVE_AFTER_MARKERS = (
     "key reference:",
     "regulatory standards:",
 )
+NEGATION_TOKENS = {"no", "not", "never", "without", "unless", "except"}
 
 
 @dataclass
@@ -57,6 +58,7 @@ def normalize_for_compare(text: str) -> str:
 def strip_footnote_markers(text: str) -> str:
     t = normalize_ws(text)
     t = normalize_footnote_tokens(t)
+    t = re.sub(r"(?i)\bencryptionmandatory\b", "encryption mandatory", t)
     t = re.sub(r"\[\s*\d{1,3}\s*\]", " ", t)
     t = re.sub(r"\(\s*\d{1,3}\s*\)", " ", t)
     t = re.sub(r'(?<=[A-Za-z"”\'\)])\s*\d{1,2}(?=(?:\s|[,\.;:\)\]"”]|$))', " ", t)
@@ -77,8 +79,8 @@ def tokenize_for_judge(text: str) -> list[str]:
 
 
 def token_jaccard(a: str, b: str) -> float:
-    at = set(tokenize_for_judge(a))
-    bt = set(tokenize_for_judge(b))
+    at = harmonize_token_set(tokenize_for_judge(a), set(tokenize_for_judge(b)))
+    bt = harmonize_token_set(tokenize_for_judge(b), at)
     if not at and not bt:
         return 1.0
     if not at or not bt:
@@ -86,10 +88,48 @@ def token_jaccard(a: str, b: str) -> float:
     return len(at & bt) / len(at | bt)
 
 
+def harmonize_token_set(tokens: list[str], other_tokens: set[str]) -> set[str]:
+    harmonized: set[str] = set()
+    for token in tokens:
+        if token in other_tokens or len(token) < 7:
+            harmonized.add(token)
+            continue
+        split_done = False
+        for idx in range(3, len(token) - 2):
+            left = token[:idx]
+            right = token[idx:]
+            if left in other_tokens and right in other_tokens:
+                harmonized.add(left)
+                harmonized.add(right)
+                split_done = True
+                break
+        if not split_done:
+            harmonized.add(token)
+    return harmonized
+
+
+def has_safe_subset_overlap(a_tokens: set[str], b_tokens: set[str], max_extra_tokens: int = 1) -> bool:
+    if not a_tokens or not b_tokens:
+        return False
+    small, large = (a_tokens, b_tokens) if len(a_tokens) <= len(b_tokens) else (b_tokens, a_tokens)
+    extras = large - small
+    if not small.issubset(large):
+        return False
+    if len(extras) > max_extra_tokens:
+        return False
+    if extras & NEGATION_TOKENS:
+        return False
+    return True
+
+
 def equivalent_requirement_text(a: str, b: str, is_exception_parent: bool) -> bool:
     if normalize_for_judge(a) == normalize_for_judge(b):
         return True
-    jac = token_jaccard(a, b)
+    at = harmonize_token_set(tokenize_for_judge(a), set(tokenize_for_judge(b)))
+    bt = harmonize_token_set(tokenize_for_judge(b), at)
+    jac = len(at & bt) / len(at | bt) if (at or bt) else 1.0
+    if has_safe_subset_overlap(at, bt):
+        return True
     if jac >= 0.98:
         return True
     if is_exception_parent and jac >= 0.95:

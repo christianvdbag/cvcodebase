@@ -1,0 +1,4 @@
+aiohttp==3.12.15
+beautifulsoup4==4.13.4
+feedparser==6.0.12
+google-cloud-bigquery==3.38.0
